@@ -11,6 +11,8 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -45,6 +47,39 @@ namespace calendar {
           + e
           + "\"/></C:comp-filter></C:comp-filter></C:filter>"
             "</C:calendar-query>";
+    }
+
+    const char* parseStatusName(ICalParseStatus status) {
+      switch (status) {
+      case ICalParseStatus::Complete:
+        return "complete";
+      case ICalParseStatus::Cancelled:
+        return "cancelled";
+      case ICalParseStatus::WorkBudgetExceeded:
+        return "recurrence work budget exceeded";
+      case ICalParseStatus::InvalidCalendar:
+        return "invalid calendar data";
+      }
+      return "unknown";
+    }
+
+    // First value of an iCalendar property (e.g. "UID", "SUMMARY") in raw text, for log messages.
+    std::string icsProperty(const std::string& ics, std::string_view name) {
+      std::size_t pos = 0;
+      while ((pos = ics.find(name, pos)) != std::string::npos) {
+        const bool lineStart = pos == 0 || ics[pos - 1] == '\n';
+        const std::size_t after = pos + name.size();
+        if (lineStart && after < ics.size() && (ics[after] == ':' || ics[after] == ';')) {
+          const std::size_t colon = ics.find(':', after);
+          const std::size_t eol = ics.find_first_of("\r\n", colon);
+          if (colon == std::string::npos) {
+            return {};
+          }
+          return ics.substr(colon + 1, eol == std::string::npos ? std::string::npos : eol - colon - 1);
+        }
+        pos = after;
+      }
+      return {};
     }
 
     // Collect the text of every element whose local name is "calendar-data".
@@ -141,9 +176,26 @@ namespace calendar {
       ICalParseControl control{.stopToken = stopToken};
 
       std::vector<CalendarEvent> events;
+      std::size_t skipped = 0;
       for (const std::string& ics : calendarDataBlocks) {
         ICalParseResult result = parseICalEvents(ics, request.start, request.end, control);
+        if (result.status == ICalParseStatus::InvalidCalendar) {
+          // One unusable resource must not hide the whole collection: skip it and say why.
+          ++skipped;
+          kLog.warn(
+              "caldav calendar '{}': skipping event uid={} summary='{}' dtstart={} rrule={} status={}: {} ({} bytes)",
+              request.calendarName, icsProperty(ics, "UID"), icsProperty(ics, "SUMMARY"), icsProperty(ics, "DTSTART"),
+              icsProperty(ics, "RRULE"), icsProperty(ics, "STATUS"), parseStatusName(result.status), ics.size()
+          );
+          continue;
+        }
         if (result.status != ICalParseStatus::Complete) {
+          if (result.status == ICalParseStatus::WorkBudgetExceeded) {
+            kLog.warn(
+                "caldav calendar '{}': rejected at event uid={}: {}", request.calendarName, icsProperty(ics, "UID"),
+                parseStatusName(result.status)
+            );
+          }
           return {false, {}};
         }
         for (CalendarEvent& event : result.events) {
@@ -154,6 +206,10 @@ namespace calendar {
           events.push_back(std::move(event));
         }
       }
+      kLog.info(
+          "caldav calendar '{}': {} resource(s), {} event(s), {} skipped", request.calendarName,
+          calendarDataBlocks.size(), events.size(), skipped
+      );
       return {true, std::move(events)};
     }
 
@@ -226,7 +282,7 @@ namespace calendar {
         return;
       }
       if (!resp.transportOk || (resp.status != 207 && resp.status != 200)) {
-        kLog.warn("caldav REPORT failed http={}", resp.status);
+        kLog.warn("caldav REPORT for calendar '{}' failed http={}", calendarName, resp.status);
         state->deliver(std::move(cb), false, {});
         return;
       }
