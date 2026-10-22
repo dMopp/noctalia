@@ -206,6 +206,15 @@ namespace calendar {
           events.push_back(std::move(event));
         }
       }
+      if (!calendarDataBlocks.empty() && skipped == calendarDataBlocks.size()) {
+        // Nothing usable at all: report a failed refresh so callers keep their last known events,
+        // matching the InvalidCalendar contract of parseICalEvents().
+        kLog.warn(
+            "caldav calendar '{}': all {} resource(s) were invalid; keeping last known events", request.calendarName,
+            calendarDataBlocks.size()
+        );
+        return {false, {}};
+      }
       kLog.info(
           "caldav calendar '{}': {} resource(s), {} event(s), {} skipped", request.calendarName,
           calendarDataBlocks.size(), events.size(), skipped

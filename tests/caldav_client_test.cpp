@@ -69,6 +69,15 @@ int main() {
                                 "DTEND:20240110T010000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
                                 "]]></C:calendar-data></D:prop></D:propstat></D:response></D:multistatus>";
 
+  // A collection made only of invalid resources must still be reported as a failed refresh.
+  const std::string allInvalidBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                                     "<D:multistatus xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">"
+                                     "<D:response><D:propstat><D:prop><C:calendar-data><![CDATA["
+                                     "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:outside\r\nDTSTART:20240301T170000Z\r\n"
+                                     "DTEND:20240301T180000Z\r\nRRULE:FREQ=WEEKLY;UNTIL=20240301T225959Z\r\n"
+                                     "this line is not iCalendar\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+                                     "]]></C:calendar-data></D:prop></D:propstat></D:response></D:multistatus>";
+
   calendar::CalDavAccount account;
   account.url = "https://example.test/calendar";
   account.calendarName = "Test";
@@ -113,6 +122,18 @@ int main() {
   ok = expect(drainUntil([&]() { return mixedCompleted; }), "timed out waiting for mixed collection") && ok;
   ok = expect(mixedOk, "one invalid resource rejected the whole collection") && ok;
   ok = expect(mixedCount == 1, "valid resource next to an invalid one was not kept") && ok;
+
+  bool allInvalidCompleted = false;
+  bool allInvalidOk = true;
+  calendar::CalDavClient allInvalidClient{[&](HttpRequest, calendar::CalDavClient::ResponseCallback callback) {
+    callback(HttpResponse{.transportOk = true, .status = 207, .body = allInvalidBody});
+  }};
+  allInvalidClient.fetchEvents(account, utc(2024, 1, 1), utc(2024, 2, 1), false, [&](bool result, auto) {
+    allInvalidOk = result;
+    allInvalidCompleted = true;
+  });
+  ok = expect(drainUntil([&]() { return allInvalidCompleted; }), "timed out waiting for all-invalid collection") && ok;
+  ok = expect(!allInvalidOk, "a collection with only invalid resources was reported as refreshed") && ok;
 
   bool expensiveCompleted = false;
   bool expensiveOk = true;
