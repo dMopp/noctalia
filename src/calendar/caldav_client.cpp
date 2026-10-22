@@ -63,9 +63,11 @@ namespace calendar {
       return "unknown";
     }
 
-    // First value of an iCalendar property (e.g. "UID", "SUMMARY") in raw text, for log messages.
+    // First value of an iCalendar property (e.g. "UID", "SUMMARY") of the first VEVENT, for log messages.
+    // Searching from BEGIN:VEVENT skips the DTSTART and RRULE lines of a preceding VTIMEZONE.
     std::string icsProperty(const std::string& ics, std::string_view name) {
-      std::size_t pos = 0;
+      const std::size_t eventStart = ics.find("BEGIN:VEVENT");
+      std::size_t pos = eventStart == std::string::npos ? 0 : eventStart;
       while ((pos = ics.find(name, pos)) != std::string::npos) {
         const bool lineStart = pos == 0 || ics[pos - 1] == '\n';
         const std::size_t after = pos + name.size();
