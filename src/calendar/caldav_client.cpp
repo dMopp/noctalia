@@ -49,20 +49,6 @@ namespace calendar {
             "</C:calendar-query>";
     }
 
-    const char* parseStatusName(ICalParseStatus status) {
-      switch (status) {
-      case ICalParseStatus::Complete:
-        return "complete";
-      case ICalParseStatus::Cancelled:
-        return "cancelled";
-      case ICalParseStatus::WorkBudgetExceeded:
-        return "recurrence work budget exceeded";
-      case ICalParseStatus::InvalidCalendar:
-        return "invalid calendar data";
-      }
-      return "unknown";
-    }
-
     // First value of an iCalendar property (e.g. "UID", "SUMMARY") of the first VEVENT, for log messages.
     // Searching from BEGIN:VEVENT skips the DTSTART and RRULE lines of a preceding VTIMEZONE.
     std::string icsProperty(const std::string& ics, std::string_view name) {
@@ -184,18 +170,20 @@ namespace calendar {
         if (result.status == ICalParseStatus::InvalidCalendar) {
           // One unusable resource must not hide the whole collection: skip it and say why.
           ++skipped;
-          kLog.warn(
-              "caldav calendar '{}': skipping event uid={} summary='{}' dtstart={} rrule={} status={}: {} ({} bytes)",
-              request.calendarName, icsProperty(ics, "UID"), icsProperty(ics, "SUMMARY"), icsProperty(ics, "DTSTART"),
-              icsProperty(ics, "RRULE"), icsProperty(ics, "STATUS"), parseStatusName(result.status), ics.size()
+          const std::string uid = icsProperty(ics, "UID");
+          kLog.warn("caldav calendar '{}': skipping invalid resource uid={}", request.calendarName, uid);
+          kLog.debug(
+              "caldav calendar '{}': skipped resource uid={} summary='{}' dtstart={} rrule={} status={} ({} bytes)",
+              request.calendarName, uid, icsProperty(ics, "SUMMARY"), icsProperty(ics, "DTSTART"),
+              icsProperty(ics, "RRULE"), icsProperty(ics, "STATUS"), ics.size()
           );
           continue;
         }
         if (result.status != ICalParseStatus::Complete) {
           if (result.status == ICalParseStatus::WorkBudgetExceeded) {
             kLog.warn(
-                "caldav calendar '{}': rejected at event uid={}: {}", request.calendarName, icsProperty(ics, "UID"),
-                parseStatusName(result.status)
+                "caldav calendar '{}': recurrence work budget exceeded at event uid={}", request.calendarName,
+                icsProperty(ics, "UID")
             );
           }
           return {false, {}};
@@ -209,15 +197,15 @@ namespace calendar {
         }
       }
       if (!calendarDataBlocks.empty() && skipped == calendarDataBlocks.size()) {
-        // Nothing usable at all: report a failed refresh so callers keep their last known events,
-        // matching the InvalidCalendar contract of parseICalEvents().
+        // Nothing usable at all: report a failed refresh instead of an empty calendar, matching the
+        // InvalidCalendar contract of parseICalEvents().
         kLog.warn(
-            "caldav calendar '{}': all {} resource(s) were invalid; keeping last known events", request.calendarName,
-            calendarDataBlocks.size()
+            "caldav calendar '{}': all {} resource(s) were invalid; reporting the calendar as failed",
+            request.calendarName, calendarDataBlocks.size()
         );
         return {false, {}};
       }
-      kLog.info(
+      kLog.debug(
           "caldav calendar '{}': {} resource(s), {} event(s), {} skipped", request.calendarName,
           calendarDataBlocks.size(), events.size(), skipped
       );
