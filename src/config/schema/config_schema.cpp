@@ -902,6 +902,7 @@ namespace noctalia::config::schema {
               }
           ),
           field(&WallpaperAutomationConfig::recursive, "recursive"),
+          field(&WallpaperAutomationConfig::pauseOnFullscreen, "pause_on_fullscreen"),
       };
       return s;
     }
