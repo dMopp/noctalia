@@ -162,7 +162,7 @@ function onResume()
 end
 ```
 
-Use `onResume()` for anything that does not survive a suspend on its own: open connections, sockets, streams, and timing based on `noctalia.nowMs()`, which does not advance while the system sleeps. The network may still be coming up when `onResume()` runs, so retry failed requests instead of giving up.
+Use `onResume()` for anything that does not survive a suspend on its own: open connections, sockets, streams, and sampling baselines. `noctalia.nowMs()` is wall-clock time, so the first delta after waking up spans the whole sleep; reset such baselines in `onResume()`. The network may still be coming up when `onResume()` runs, so retry failed requests instead of giving up.
 
 `onSuspend()` is best effort. Noctalia does not delay the suspend for plugins, so the system can freeze before the callback runs. Keep it short and do not rely on it for cleanup that must happen; `onResume()` runs after every wake-up.
 
